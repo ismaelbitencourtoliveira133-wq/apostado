@@ -1,0 +1,45 @@
+{
+  "_comentario": "Todos os IDs abaixo podem ser alterados livremente sem precisar mexer no código.",
+
+  "canais": {
+    "mobile": {
+      "1x1": "1512941887160582217",
+      "2x2": "1512941973844131909",
+      "3x3": "1512942016647008266",
+      "4x4": "1512942065044946954"
+    },
+    "emulador": {
+      "1x1": "1512942514955620473",
+      "2x2": "1512942552704090213",
+      "3x3": "1512942615719317576",
+      "4x4": "1512942701543165972"
+    },
+    "misto": {
+      "2x2": "1512942307773780028",
+      "3x3": "1512942342414274631",
+      "4x4": "1512942377621524541"
+    }
+  },
+
+  "categoriaPartidasId": "1522738562179534939",
+  "canalLogsId": "1522738631826079914",
+
+  "cargos": {
+    "staffId": "1512938481863888936",
+    "administradorId": "1512938481863888936"
+  },
+
+  "valoresAposta": [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 30.0, 50.0, 100.0],
+
+  "modos": {
+    "normal": { "label": "Normal", "emoji": "🟢", "estilo": "Success" },
+    "full": { "label": "Full UMP e XM8", "emoji": "🔵", "estilo": "Primary" }
+  },
+
+  "cores": {
+    "aposta": "#2b2d31",
+    "partida": "#57F287",
+    "log": "#5865F2",
+    "cancelado": "#ED4245"
+  }
+}
