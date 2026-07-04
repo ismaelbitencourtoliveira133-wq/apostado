@@ -194,7 +194,13 @@ function criarBetEmbed(valorAposta, fila) {
     .setLabel(`${config.modos.full.emoji} ${config.modos.full.label}`)
     .setStyle(ButtonStyle.Primary);
 
-  return { embeds: [embed], components: [new ActionRowBuilder().addComponents(botaoNormal, botaoFull)] };
+  const botaoSair = new ButtonBuilder()
+    .setCustomId(`sair:${valorAposta}`)
+    .setLabel('Sair da Fila')
+    .setEmoji('🚪')
+    .setStyle(ButtonStyle.Secondary);
+
+  return { embeds: [embed], components: [new ActionRowBuilder().addComponents(botaoNormal, botaoFull, botaoSair)] };
 }
 
 function criarMatchEmbed({ valorAposta, modo, jogador1Id, jogador2Id, status = 'ongoing' }) {
@@ -466,6 +472,36 @@ botoes.set('bet', {
       }
 
       await atualizarEmbedFila(client, canalId, valorAposta);
+    } finally {
+      destravarUsuario(usuarioId);
+    }
+  },
+});
+
+// ---- sair:<valorAposta> — sair da fila -------------------------------------
+botoes.set('sair', {
+  async execute(interaction, args, client) {
+    const [valorApostaStr] = args;
+    const valorAposta = parseFloat(valorApostaStr);
+    const canalId = interaction.channelId;
+    const usuarioId = interaction.user.id;
+
+    if (!travarUsuario(usuarioId)) {
+      return interaction.reply({ content: '⏳ Seu clique anterior ainda está sendo processado, aguarde um instante.', ephemeral: true });
+    }
+
+    try {
+      await interaction.deferUpdate();
+
+      const existente = filaModel.buscarPorUsuarioNoCanal(canalId, usuarioId);
+      if (!existente || existente.valor_aposta !== valorAposta) {
+        return interaction.followUp({ content: 'ℹ️ Você não está na fila desta aposta.', ephemeral: true });
+      }
+
+      filaModel.removerPorId(existente.id);
+      await atualizarEmbedFila(client, canalId, valorAposta);
+
+      await interaction.followUp({ content: '🚪 Você saiu da fila com sucesso.', ephemeral: true });
     } finally {
       destravarUsuario(usuarioId);
     }
