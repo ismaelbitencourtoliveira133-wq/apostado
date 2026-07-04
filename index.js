@@ -245,8 +245,22 @@ function estaEmPartida(usuarioId) {
 
 /** Reenvia/edita a embed principal de um canal+valor com a fila atualizada. */
 async function atualizarEmbedFila(client, canalId, valorAposta) {
-  const canal = await client.channels.fetch(canalId).catch(() => null);
-  if (!canal) return logger.warn(`Canal ${canalId} não encontrado ao tentar atualizar embed.`);
+  let canal;
+  try {
+    canal = await client.channels.fetch(canalId);
+  } catch (err) {
+    logger.error(
+      `Não consegui acessar o canal ${canalId} (R$${valorAposta}). Motivo: ${err.message}. ` +
+        `Verifique se o ID em config.json está correto e se o bot foi convidado para este servidor ` +
+        `com permissão de "Ver Canal" e "Enviar Mensagens" nesse canal.`
+    );
+    return;
+  }
+  if (!canal) return logger.warn(`Canal ${canalId} retornou vazio ao tentar atualizar embed.`);
+  if (!canal.isTextBased || !canal.isTextBased()) {
+    logger.error(`Canal ${canalId} não é um canal de texto (confira se o ID não é de uma categoria/voz).`);
+    return;
+  }
 
   const fila = filaModel.listarPorCanal(canalId, valorAposta);
   const conteudo = criarBetEmbed(valorAposta, fila);
@@ -260,8 +274,16 @@ async function atualizarEmbedFila(client, canalId, valorAposta) {
     }
   }
 
-  const novaMensagem = await canal.send(conteudo);
-  embedMsgModel.salvar(canalId, valorAposta, novaMensagem.id);
+  try {
+    const novaMensagem = await canal.send(conteudo);
+    embedMsgModel.salvar(canalId, valorAposta, novaMensagem.id);
+  } catch (err) {
+    logger.error(
+      `Falha ao ENVIAR a embed no canal ${canalId} (R$${valorAposta}). Motivo: ${err.message}. ` +
+        `Provavelmente falta a permissão "Enviar Mensagens" (e "Inserir Links/Embeds") para o bot ` +
+        `nesse canal específico.`
+    );
+  }
 }
 
 /** Cria o canal privado de texto para a partida, dentro da categoria configurada. */
@@ -291,10 +313,59 @@ async function criarCanalPartida(guild, { valorAposta, modo, jogador1Id, jogador
 // =============================================================================
 const comandos = new Collection();
 
+/** Envia/atualiza todas as embeds de aposta em todos os canais configurados. Retorna o total processado. */
+async function enviarTodasAsEmbeds(client) {
+  const canaisConfigurados = [];
+  for (const plataforma of Object.keys(config.canais)) {
+    for (const tamanho of Object.keys(config.canais[plataforma])) {
+      const canalId = config.canais[plataforma][tamanho];
+      if (canalId) canaisConfigurados.push(canalId);
+    }
+  }
+
+  let total = 0;
+  for (const canalId of canaisConfigurados) {
+    for (const valorAposta of config.valoresAposta) {
+      await atualizarEmbedFila(client, canalId, valorAposta);
+      total++;
+    }
+  }
+  return total;
+}
+
 comandos.set('ping', {
   data: new SlashCommandBuilder().setName('ping').setDescription('Verifica se o bot está online e sua latência.'),
   async execute(interaction, client) {
     await interaction.reply({ content: `🏓 Pong! Latência da API: \`${Math.round(client.ws.ping)}ms\``, ephemeral: true });
+  },
+});
+
+// ---- /start — só quem tem o cargo Staff/Administrador (config.cargos) pode usar ----
+comandos.set('start', {
+  data: new SlashCommandBuilder()
+    .setName('start')
+    .setDescription('[Staff] Inicia o bot: envia as embeds de aposta em todos os canais configurados.'),
+  async execute(interaction, client) {
+    if (!ehStaffOuAdmin(interaction.member)) {
+      return interaction.reply({
+        content: '🚫 Apenas quem tem o cargo Staff ou Administrador pode usar este comando.',
+        ephemeral: true,
+      });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    logger.info(`/start executado por ${interaction.user.tag} (${interaction.user.id}).`);
+
+    const total = await enviarTodasAsEmbeds(client);
+
+    await interaction.editReply(`✅ Bot iniciado! ${total} embed(s) enviada(s)/atualizada(s) com sucesso em todos os canais.`);
+
+    const logEmbed = new EmbedBuilder()
+      .setColor(config.cores.log)
+      .setTitle('🚀 Bot Iniciado')
+      .setDescription(`Comando \`/start\` executado por <@${interaction.user.id}>.\n${total} embed(s) enviada(s)/atualizada(s).`)
+      .setTimestamp();
+    await logger.logToChannel(client, logEmbed);
   },
 });
 
@@ -308,21 +379,7 @@ comandos.set('setup', {
     }
     await interaction.deferReply({ ephemeral: true });
 
-    const canaisConfigurados = [];
-    for (const plataforma of Object.keys(config.canais)) {
-      for (const tamanho of Object.keys(config.canais[plataforma])) {
-        const canalId = config.canais[plataforma][tamanho];
-        if (canalId) canaisConfigurados.push(canalId);
-      }
-    }
-
-    let total = 0;
-    for (const canalId of canaisConfigurados) {
-      for (const valorAposta of config.valoresAposta) {
-        await atualizarEmbedFila(client, canalId, valorAposta);
-        total++;
-      }
-    }
+    const total = await enviarTodasAsEmbeds(client);
     await interaction.editReply(`✅ ${total} embed(s) atualizada(s)/reenviada(s) com sucesso.`);
   },
 });
@@ -505,17 +562,38 @@ client.once('ready', async () => {
     }
   }
 
-  logger.info(`Inicializando embeds em ${canaisConfigurados.length} canal(is) de partida...`);
+  // ---- Diagnóstico prévio: confere se cada canal configurado é acessível ----
+  logger.info('Verificando acesso a cada canal configurado em config.json...');
   for (const { plataforma, tamanho, canalId } of canaisConfigurados) {
-    for (const valorAposta of config.valoresAposta) {
-      try {
-        await atualizarEmbedFila(client, canalId, valorAposta);
-      } catch (err) {
-        logger.error(`Falha ao inicializar embed [${plataforma}/${tamanho} - R$${valorAposta}]: ${err.message}`);
+    try {
+      const canalTeste = await client.channels.fetch(canalId);
+      if (!canalTeste) {
+        logger.error(`[${plataforma}/${tamanho}] Canal ${canalId} NÃO encontrado (fetch retornou vazio).`);
+      } else if (!canalTeste.isTextBased || !canalTeste.isTextBased()) {
+        logger.error(`[${plataforma}/${tamanho}] Canal ${canalId} existe mas NÃO é um canal de texto.`);
+      } else {
+        const permissoesBot = canalTeste.permissionsFor(client.user);
+        const podeVer = permissoesBot?.has(PermissionFlagsBits.ViewChannel);
+        const podeEnviar = permissoesBot?.has(PermissionFlagsBits.SendMessages);
+        if (!podeVer || !podeEnviar) {
+          logger.error(
+            `[${plataforma}/${tamanho}] Canal ${canalId} encontrado, mas o bot NÃO tem permissão de ` +
+              `${!podeVer ? 'Ver Canal ' : ''}${!podeEnviar ? 'Enviar Mensagens' : ''} nele.`
+          );
+        } else {
+          logger.success(`[${plataforma}/${tamanho}] Canal ${canalId} OK (acessível e com permissão).`);
+        }
       }
+    } catch (err) {
+      logger.error(
+        `[${plataforma}/${tamanho}] Não foi possível acessar o canal ${canalId}. Motivo: ${err.message}. ` +
+          `O ID está correto? O bot foi convidado para este servidor?`
+      );
     }
   }
-  logger.success('Todas as embeds de aposta foram inicializadas/atualizadas com sucesso.');
+
+  logger.success('Diagnóstico concluído. As embeds NÃO são enviadas automaticamente.');
+  logger.info('Peça para alguém com o cargo Staff/Administrador usar o comando /start no Discord para enviar as embeds.');
 });
 
 client.on('interactionCreate', async (interaction) => {
