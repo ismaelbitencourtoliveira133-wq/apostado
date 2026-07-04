@@ -637,7 +637,15 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const comando = comandos.get(interaction.commandName);
       if (!comando) return;
-      return comando.execute(interaction, client);
+
+      try {
+        return await comando.execute(interaction, client);
+      } catch (err) {
+        logger.error(`Erro ao executar comando "/${interaction.commandName}": ${err.stack || err.message}`);
+        const payload = { content: '❌ Ocorreu um erro ao executar este comando. Verifique o console do bot para mais detalhes.', ephemeral: true };
+        if (interaction.deferred || interaction.replied) await interaction.editReply(payload).catch(() => interaction.followUp(payload).catch(() => {}));
+        else await interaction.reply(payload).catch(() => {});
+      }
     }
 
     if (interaction.isButton()) {
